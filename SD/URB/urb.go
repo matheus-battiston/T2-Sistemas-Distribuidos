@@ -19,6 +19,7 @@ import (
 type URB_Req_Message struct {
 	Addresses []string
 	Message   string
+	TimeStamp int
 }
 
 type URB_Ind_Message struct {
@@ -31,111 +32,199 @@ type ACKS struct {
 	quemDeuAck  []string
 	quantosAcks int
 }
-
 type URB_Module struct {
-	Ind          chan URB_Ind_Message
-	Req          chan URB_Req_Message
-	Quit         chan bool
-	beb          BestEffortBroadcast_Module
-	pending      []string
-	delivered    []string
-	addresses    []string
-	dbg          bool
-	listaComACKS []ACKS
+	Ind              chan URB_Ind_Message
+	Req              chan URB_Req_Message
+	Quit             chan bool
+	beb              BestEffortBroadcast_Module
+	addresses        []string
+	dbg              bool
+	listaDeMensagens []Local
+	final            []Mensagem
+	clock            int
+	deliver          []Mensagem
 }
 
-func (module *URB_Module) foiEntrege(message string) bool {
-	for i := 0; i < len(module.delivered); i++ {
-		if module.delivered[i] == message {
+type Local struct {
+	Message string
+	Tempo   []int
+}
+
+type Mensagem struct {
+	Message string
+	Tempo   int
+}
+
+func (module *URB_Module) adicionaTimeStamp(message Mensagem) {
+	for i := 0; i < len(module.listaDeMensagens); i++ {
+		if message.Message == module.listaDeMensagens[i].Message {
+			module.listaDeMensagens[i].Tempo = append(module.listaDeMensagens[i].Tempo, message.Tempo)
+		}
+	}
+}
+func (module *URB_Module) RemoveIndex(index int) []Local {
+	return append(module.listaDeMensagens[:index], module.listaDeMensagens[index+1:]...)
+}
+
+func (module *URB_Module) jaRecebeu(message Mensagem) bool {
+	for i := 0; i < len(module.listaDeMensagens); i++ {
+		if message.Message == module.listaDeMensagens[i].Message {
 			return true
+		}
+	}
+
+	return false
+}
+
+func (module *URB_Module) adicionaMensagemLocal(message Mensagem) {
+	var timeStampLocal = []int{module.clock}
+	var mensagem = Local{
+		Message: message.Message,
+		Tempo:   timeStampLocal,
+	}
+	module.listaDeMensagens = append(module.listaDeMensagens, mensagem)
+}
+
+func (module *URB_Module) receive(message Mensagem) {
+	if module.jaRecebeu(message) {
+		fmt.Println(message.Message, "JA RECEBEU")
+		module.adicionaTimeStamp(message)
+	} else {
+		fmt.Println(message.Message, "NAO RECEBEU")
+		module.clock = module.clock + 1
+		module.adicionaMensagemLocal(message)
+		module.adicionaTimeStamp(message)
+		module.Broadcast(URB_Req_Message{
+			Addresses: module.addresses,
+			Message:   message.Message,
+			TimeStamp: module.clock,
+		})
+	}
+
+	if module.checarSeRecebeuDeTodos(message) {
+		module.jaRecebeuDeTodos(message)
+	}
+}
+
+func (module *URB_Module) checarSeRecebeuDeTodos(message Mensagem) bool {
+	for i := 0; i < len(module.listaDeMensagens); i++ {
+		if message.Message == module.listaDeMensagens[i].Message {
+			tamanhoTS := len(module.listaDeMensagens[i].Tempo) - 1
+			numeroDeClients := len(module.addresses)
+			fmt.Println(tamanhoTS, numeroDeClients)
+			return tamanhoTS == numeroDeClients
 		}
 	}
 	return false
 }
 
-func RemoveIndex(s []string, index int) []string {
-	if len(s) == 1 {
-		return []string{}
-	}
-	return append(s[:index], s[index+1:]...)
+func (module *URB_Module) jaRecebeuDeTodos(message Mensagem) {
+	var msgLocal = module.getMensagemDaLista(message)
+	var maxTS = getMaxTS(msgLocal)
+	module.final = module.addFinalOrdenado(Mensagem{
+		Message: message.Message,
+		Tempo:   maxTS,
+	})
+	var index = module.getIndex(message)
+
+	module.listaDeMensagens = module.RemoveIndex(index)
+
+	module.clock = getMaxClock(module.clock, maxTS)
+	module.tryDeliver()
 }
 
-func (module *URB_Module) getIndex(message string) int {
-	for i := 0; i < len(module.pending); i++ {
-		if module.pending[i] == message {
+func (module *URB_Module) addFinalOrdenado(message Mensagem) []Mensagem {
+	var novoModuloFinal []Mensagem
+	var tamanhoFinal = len(module.final)
+	if tamanhoFinal == 0 {
+		novoModuloFinal = []Mensagem{message}
+	} else {
+		for i := 0; i < tamanhoFinal; i++ {
+			if message.Tempo < module.final[i].Tempo {
+				novoModuloFinal = append(module.final[:i+1], module.final[i:]...)
+				novoModuloFinal[i] = message
+			}
+		}
+	}
+
+	return novoModuloFinal
+}
+
+func (module *URB_Module) getIndex(message Mensagem) int {
+	for i := 0; i < len(module.listaDeMensagens); i++ {
+		if message.Message == module.listaDeMensagens[i].Message {
 			return i
 		}
 	}
 	return -1
 }
 
-func (module *URB_Module) estaPendente(message string) bool {
-	for i := 0; i < len(module.pending); i++ {
-		if module.pending[i] == message {
-			return true
+func (module *URB_Module) getIndexFinal(message Mensagem) int {
+	for i := 0; i < len(module.final); i++ {
+		if message.Message == module.final[i].Message {
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
-func (module *URB_Module) adicionaAck(message URB_Ind_Message) {
-	if !module.estaNosAcks(message.Message) {
-		module.listaComACKS = append(module.listaComACKS, ACKS{
-			Message:     message.Message,
-			quantosAcks: 0,
+func (module *URB_Module) RemoveIndexFinal(index int) []Mensagem {
+	return append(module.final[:index], module.final[index+1:]...)
+}
+
+func (module *URB_Module) tryDeliver() {
+	fmt.Println("TRY DELIVER")
+	for i := 0; i < len(module.final); i++ {
+		for j := 0; j < len(module.listaDeMensagens); j++ {
+			var max = getMaxTS(module.listaDeMensagens[i])
+			if max < module.final[i].Tempo {
+				return
+			}
+		}
+		module.deliver = append(module.deliver, module.final[i])
+		module.Deliver(URB_Ind_Message{
+			Message: module.final[i].Message,
 		})
-	}
+		module.final = module.RemoveIndexFinal(module.getIndexFinal(module.final[i]))
 
-	for i := 0; i < len(module.listaComACKS); i++ {
-		if module.listaComACKS[i].Message == message.Message && naoDeuAckAinda(message.From, module.listaComACKS[i].quemDeuAck) {
-			module.listaComACKS[i].quantosAcks++
-			module.listaComACKS[i].quemDeuAck = append(module.listaComACKS[i].quemDeuAck, message.From)
-		}
 	}
 }
 
-func naoDeuAckAinda(quemEh string, listaDeAcks []string) bool {
-	for i := 0; i < len(listaDeAcks); i++ {
-		if listaDeAcks[i] == quemEh {
-			return false
+func (module *URB_Module) getMensagemDaLista(message Mensagem) Local {
+	for i := 0; i < len(module.listaDeMensagens); i++ {
+		if message.Message == module.listaDeMensagens[i].Message {
+			return module.listaDeMensagens[i]
 		}
 	}
-	return true
+	return Local{}
 }
 
-func (module *URB_Module) estaNosAcks(message string) bool {
-	for i := 0; i < len(module.listaComACKS); i++ {
-		if module.listaComACKS[i].Message == message {
-			return true
+func getMaxTS(message Local) int {
+	var timeStamp = 0
+
+	for i := 0; i < len(message.Tempo); i++ {
+		if message.Tempo[i] > timeStamp {
+			timeStamp = message.Tempo[i]
 		}
 	}
-	return false
+
+	return timeStamp
 }
 
-func (module *URB_Module) naoTemAck(message string, acksDaMensagem string) bool {
-	for i := 0; i < len(acksDaMensagem); i++ {
-		if string(acksDaMensagem[i]) == string(message) {
-			return true
-		}
+func getMaxClock(clock int, timeStamp int) int {
+	if clock > timeStamp {
+		return clock
+	} else if timeStamp > clock {
+		return timeStamp
 	}
-	return false
+
+	return clock
 }
 
 func (module *URB_Module) outDbg(s string) {
 	if module.dbg {
 		fmt.Println(". . . . . . . . . [ URB msg : " + s + " ]")
 	}
-}
-
-func (module *URB_Module) canDeliver(message string) bool {
-	for i := 0; i < len(module.listaComACKS); i++ {
-		if message == module.listaComACKS[i].Message {
-			if module.listaComACKS[i].quantosAcks > ((len(module.addresses)) / 2) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (module *URB_Module) Init(address string, addresses []string) {
@@ -157,23 +246,21 @@ func (module *URB_Module) InitD(address string, _dbg bool, addresses []string) {
 
 func (module *URB_Module) Start() {
 
+	module.clock = 0
 	go func() {
 		for {
 			select {
 			case y := <-module.Req:
 				module.Broadcast(y)
+				module.adicionaMensagemLocal(Mensagem{
+					Message: y.Message,
+					Tempo:   y.TimeStamp,
+				})
 			case y := <-module.beb.Ind:
-				module.adicionaAck(URB_Ind_Message(y))
-				if module.canDeliver(y.Message) && module.estaPendente(y.Message) && !module.foiEntrege(y.Message) {
-					module.Deliver(URB_Ind_Message(y))
-				} else if !module.estaPendente(y.Message) {
-					module.pending = append(module.pending, y.Message)
-					msg := URB_Req_Message{
-						Addresses: module.addresses,
-						Message:   y.Message,
-					}
-					module.Broadcast(msg)
-				}
+				module.receive(Mensagem{
+					Message: y.Message,
+					Tempo:   y.TimeStamp,
+				})
 			}
 
 		}
@@ -187,20 +274,16 @@ func (module *URB_Module) quit() {
 
 func (module *URB_Module) Broadcast(message URB_Req_Message) {
 
-	if !module.estaPendente(message.Message) {
-		module.pending = append(module.pending, message.Message)
-	}
 	req := BestEffortBroadcast_Req_Message{
 		Addresses: module.addresses,
-		Message:   message.Message}
+		Message:   message.Message,
+		TimeStamp: message.TimeStamp}
 	module.beb.Req <- req
 }
 
 func (module *URB_Module) Deliver(message URB_Ind_Message) {
 
-	module.delivered = append(module.delivered, message.Message)
-	index := module.getIndex(message.Message)
-	module.pending = RemoveIndex(module.pending, index)
+	fmt.Println("DELIVERED")
 	// fmt.Println("Received '" + message.Message + "' from " + message.From)
 	module.Ind <- message
 	// fmt.Println("# End BEB Received")

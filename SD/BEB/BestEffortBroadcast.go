@@ -20,11 +20,13 @@ import (
 type BestEffortBroadcast_Req_Message struct {
 	Addresses []string
 	Message   string
+	TimeStamp int
 }
 
 type BestEffortBroadcast_Ind_Message struct {
-	From    string
-	Message string
+	From      string
+	Message   string
+	TimeStamp int
 }
 
 type BestEffortBroadcast_Module struct {
@@ -78,7 +80,6 @@ func (module *BestEffortBroadcast_Module) Broadcast(message BestEffortBroadcast_
 		msg := BEB2PP2PLink(message)
 		msg.To = message.Addresses[i]
 		module.Pp2plink.Req <- msg
-		module.outDbg("Sent to " + message.Addresses[i])
 	}
 }
 
@@ -92,16 +93,18 @@ func (module *BestEffortBroadcast_Module) Deliver(message BestEffortBroadcast_In
 func BEB2PP2PLink(message BestEffortBroadcast_Req_Message) PP2PLink.PP2PLink_Req_Message {
 
 	return PP2PLink.PP2PLink_Req_Message{
-		To:      message.Addresses[0],
-		Message: message.Message}
+		To:        message.Addresses[0],
+		Message:   message.Message,
+		TimeStamp: message.TimeStamp}
 
 }
 
 func PP2PLink2BEB(message PP2PLink.PP2PLink_Ind_Message) BestEffortBroadcast_Ind_Message {
 
 	return BestEffortBroadcast_Ind_Message{
-		From:    message.From,
-		Message: message.Message}
+		From:      message.From,
+		Message:   message.Message,
+		TimeStamp: message.TimeStamp}
 }
 
 /*

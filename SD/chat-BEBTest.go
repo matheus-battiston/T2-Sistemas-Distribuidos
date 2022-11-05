@@ -77,12 +77,12 @@ func enviarBroadcastsComFalha(numeroInt int, addresses []string, urb URB_Module)
 func enviarBroadcastsSemFalha(numeroInt int, addresses []string, urb URB_Module) {
 	var msg string
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 5; i++ {
 		numeroDaMsg := numeroInt + i
 		numeroDaMsgString := strconv.Itoa(numeroDaMsg)
 		msg = numeroDaMsgString + string("§") + string(addresses[0])
 		req := URB_Req_Message{
-			Addresses: addresses[0:],
+			Addresses: addresses[1:],
 			Message:   msg}
 		urb.Req <- req
 	}
@@ -125,7 +125,7 @@ func main() {
 		Req: make(chan URB_Req_Message, 10000),
 		Ind: make(chan URB_Ind_Message, 10000)}
 
-	urb.Init(addresses[0], addresses[0:])
+	urb.Init(addresses[0], addresses[1:])
 
 	// enviador de broadcasts
 	go func() {
@@ -164,9 +164,9 @@ func main() {
 			fmt.Printf("          Message from %v: %v\n", in.From, in.Message)
 
 			if len(registro) == 1 && in.From != addresses[0] {
-				go enviarBroadcastsSemFalha(numeroInt, addresses, urb)
+				go enviarBroadcastsSemFalha(numeroInt, addresses[1:], urb)
 			}
-			if len(registro) == len(addresses)*1000 {
+			if len(registro) == len(addresses)*5 {
 				Write((addresses[0])+".txt", registro)
 				fmt.Println(contagemDeEnvios, "ContagemEnvios")
 				os.Exit(0)
