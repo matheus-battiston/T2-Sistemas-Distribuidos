@@ -8,7 +8,6 @@ def getResultados(listaRespostas: list[str]) -> list[list[int]]:
             lines = f.readlines()
             for linhas in lines:
                 retirarLinha.append(int(linhas.strip("\n")))
-                retirarLinha.sort()
             listasDeResultados.append(retirarLinha)
 
     return listasDeResultados

@@ -52,40 +52,32 @@ func jaMandouMensagem(nome string, listaQuemMandou []envios) bool {
 	return false
 }
 
-func enviarBroadcastsComFalha(numeroInt int, addresses []string, urb URB_Module) {
-	var msg string
-
-	for i := 0; i < 1000; i++ {
-		numeroDaMsg := numeroInt + i
-		numeroDaMsgString := strconv.Itoa(numeroDaMsg)
-		msg = numeroDaMsgString + string("§") + string(addresses[0])
-		if numeroDaMsg == 8000 {
-			req := URB_Req_Message{
-				Addresses: addresses[2:3],
-				Message:   msg}
-			urb.Req <- req
-			<-urb.Ind
-		} else {
-			req := URB_Req_Message{
-				Addresses: addresses[0:],
-				Message:   msg}
-			urb.Req <- req
-		}
-	}
-}
-
 func enviarBroadcastsSemFalha(numeroInt int, addresses []string, urb URB_Module) {
 	var msg string
 
-	for i := 0; i < 5; i++ {
-		numeroDaMsg := numeroInt + i
-		numeroDaMsgString := strconv.Itoa(numeroDaMsg)
-		msg = numeroDaMsgString + string("§") + string(addresses[0])
-		req := URB_Req_Message{
-			Addresses: addresses[1:],
-			Message:   msg}
-		urb.Req <- req
-	}
+	go func() {
+		for i := 0; i < 50; i++ {
+			numeroDaMsg := numeroInt + i
+			numeroDaMsgString := strconv.Itoa(numeroDaMsg)
+			msg = numeroDaMsgString + string("§") + string(addresses[0]) + "/-1"
+			req := URB_Req_Message{
+				Addresses: addresses[1:],
+				Message:   msg}
+			urb.Req <- req
+		}
+	}()
+
+	go func() {
+		for i := 0; i < 50; i++ {
+			numeroDaMsg := numeroInt + i + 5000
+			numeroDaMsgString := strconv.Itoa(numeroDaMsg)
+			msg = numeroDaMsgString + string("§") + string(addresses[0]) + "/-1"
+			req := URB_Req_Message{
+				Addresses: addresses[1:],
+				Message:   msg}
+			urb.Req <- req
+		}
+	}()
 }
 
 func Write(fileName string, message []string) {
@@ -122,7 +114,7 @@ func main() {
 	addresses := os.Args[1:]
 
 	urb := URB_Module{
-		Req: make(chan URB_Req_Message, 10000),
+		Req: make(chan URB_Req_Message),
 		Ind: make(chan URB_Ind_Message, 10000)}
 
 	urb.Init(addresses[0], addresses[1:])
@@ -138,9 +130,7 @@ func main() {
 
 		if scanner.Scan() {
 			msg = scanner.Text()
-			if msg == "1" {
-				enviarBroadcastsComFalha(numeroInt, addresses, urb)
-			} else if msg == "2" {
+			if msg == "2" {
 				enviarBroadcastsSemFalha(numeroInt, addresses, urb)
 			}
 		}
@@ -151,25 +141,19 @@ func main() {
 
 		for {
 			in := <-urb.Ind
-			numero := strings.Split(addresses[0], ":")[1]
-			numeroInt, err := strconv.Atoi(numero)
-			_ = err
 			message := strings.Split(in.Message, "§")
 			contagemDeEnvios = adicionaRecebido(message[1], contagemDeEnvios)
-			in.From = message[1]
+			in.Tempo = message[1]
 			registro = append(registro, strings.Split(in.Message, "§")[0])
 			in.Message = message[0]
 
 			// imprime a mensagem recebida na tela
-			fmt.Printf("          Message from %v: %v\n", in.From, in.Message)
+			// fmt.Printf("          Message from %v: %v\n", in.Tempo, in.Message)
 
-			if len(registro) == 1 && in.From != addresses[0] {
-				go enviarBroadcastsSemFalha(numeroInt, addresses[1:], urb)
-			}
-			if len(registro) == len(addresses)*5 {
+			if len(registro) == 100 {
 				Write((addresses[0])+".txt", registro)
-				fmt.Println(contagemDeEnvios, "ContagemEnvios")
-				os.Exit(0)
+				fmt.Println(registro)
+				// fmt.Println(contagemDeEnvios, "ContagemEnvios")
 			}
 		}
 	}()

@@ -80,6 +80,7 @@ func (module *BestEffortBroadcast_Module) Broadcast(message BestEffortBroadcast_
 		msg := BEB2PP2PLink(message)
 		msg.To = message.Addresses[i]
 		module.Pp2plink.Req <- msg
+		module.outDbg("Sent to " + message.Addresses[i])
 	}
 }
 

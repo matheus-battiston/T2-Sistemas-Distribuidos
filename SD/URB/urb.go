@@ -14,6 +14,9 @@ package Urb
 import (
 	. "SD/BEB"
 	"fmt"
+	"math"
+	"strconv"
+	"strings"
 )
 
 type URB_Req_Message struct {
@@ -23,7 +26,7 @@ type URB_Req_Message struct {
 }
 
 type URB_Ind_Message struct {
-	From    string
+	Tempo   string
 	Message string
 }
 
@@ -55,6 +58,9 @@ type Mensagem struct {
 	Tempo   int
 }
 
+var CONST_TS_PADRAO = -1
+
+// Função para adicionar um TimeStamp a uma mensagem que ja foi adicioanda
 func (module *URB_Module) adicionaTimeStamp(message Mensagem) {
 	for i := 0; i < len(module.listaDeMensagens); i++ {
 		if message.Message == module.listaDeMensagens[i].Message {
@@ -62,20 +68,23 @@ func (module *URB_Module) adicionaTimeStamp(message Mensagem) {
 		}
 	}
 }
+
+// Função para remover uma mensagem da lista de mensagens local dado um indice
 func (module *URB_Module) RemoveIndex(index int) []Local {
 	return append(module.listaDeMensagens[:index], module.listaDeMensagens[index+1:]...)
 }
 
+// Função para identificar se uma determinada mensagem ja foi recebida antes ou nao
 func (module *URB_Module) jaRecebeu(message Mensagem) bool {
 	for i := 0; i < len(module.listaDeMensagens); i++ {
 		if message.Message == module.listaDeMensagens[i].Message {
 			return true
 		}
 	}
-
 	return false
 }
 
+// Função para adicionar a lista de mensagens local uma mensagem
 func (module *URB_Module) adicionaMensagemLocal(message Mensagem) {
 	var timeStampLocal = []int{module.clock}
 	var mensagem = Local{
@@ -85,43 +94,32 @@ func (module *URB_Module) adicionaMensagemLocal(message Mensagem) {
 	module.listaDeMensagens = append(module.listaDeMensagens, mensagem)
 }
 
-func (module *URB_Module) receive(message Mensagem) {
-	if module.jaRecebeu(message) {
-		fmt.Println(message.Message, "JA RECEBEU")
-		module.adicionaTimeStamp(message)
+// Função para tratar uma mensagem que foi recebida, identificando o que deve ser adicionado, ela toda ou apenas o timestamp
+func (module *URB_Module) tratamentoMensagem(mensagemOrignal Mensagem, mensagemASerAdicionada Mensagem) {
+	if !module.jaRecebeu(mensagemOrignal) {
+		module.adicionaMensagemLocal(mensagemASerAdicionada)
 	} else {
-		fmt.Println(message.Message, "NAO RECEBEU")
-		module.clock = module.clock + 1
-		module.adicionaMensagemLocal(message)
-		module.adicionaTimeStamp(message)
-		module.Broadcast(URB_Req_Message{
-			Addresses: module.addresses,
-			Message:   message.Message,
-			TimeStamp: module.clock,
-		})
-	}
-
-	if module.checarSeRecebeuDeTodos(message) {
-		module.jaRecebeuDeTodos(message)
+		module.adicionaTimeStamp(mensagemASerAdicionada)
 	}
 }
 
+// Função para identificar se ja foi recebido o timestamp de todos os outros processos para uma determinada mensagem
 func (module *URB_Module) checarSeRecebeuDeTodos(message Mensagem) bool {
 	for i := 0; i < len(module.listaDeMensagens); i++ {
 		if message.Message == module.listaDeMensagens[i].Message {
-			tamanhoTS := len(module.listaDeMensagens[i].Tempo) - 1
-			numeroDeClients := len(module.addresses)
-			fmt.Println(tamanhoTS, numeroDeClients)
+			tamanhoTS := len(module.listaDeMensagens[i].Tempo)
+			numeroDeClients := len(module.addresses) + 1
 			return tamanhoTS == numeroDeClients
 		}
 	}
 	return false
 }
 
+// Função utilizada quando ja foi recebido o timestamp de todos os processos. Irá adicionar a lista de Final e tentara fazer o delivery
 func (module *URB_Module) jaRecebeuDeTodos(message Mensagem) {
 	var msgLocal = module.getMensagemDaLista(message)
 	var maxTS = getMaxTS(msgLocal)
-	module.final = module.addFinalOrdenado(Mensagem{
+	module.addFinal(Mensagem{
 		Message: message.Message,
 		Tempo:   maxTS,
 	})
@@ -133,23 +131,12 @@ func (module *URB_Module) jaRecebeuDeTodos(message Mensagem) {
 	module.tryDeliver()
 }
 
-func (module *URB_Module) addFinalOrdenado(message Mensagem) []Mensagem {
-	var novoModuloFinal []Mensagem
-	var tamanhoFinal = len(module.final)
-	if tamanhoFinal == 0 {
-		novoModuloFinal = []Mensagem{message}
-	} else {
-		for i := 0; i < tamanhoFinal; i++ {
-			if message.Tempo < module.final[i].Tempo {
-				novoModuloFinal = append(module.final[:i+1], module.final[i:]...)
-				novoModuloFinal[i] = message
-			}
-		}
-	}
-
-	return novoModuloFinal
+// Adiciona uma mensagem a lista Final
+func (module *URB_Module) addFinal(message Mensagem) {
+	module.final = append(module.final, message)
 }
 
+// Função para retornar o indice de uma determinada mensagem na lista de mensagens local
 func (module *URB_Module) getIndex(message Mensagem) int {
 	for i := 0; i < len(module.listaDeMensagens); i++ {
 		if message.Message == module.listaDeMensagens[i].Message {
@@ -159,6 +146,7 @@ func (module *URB_Module) getIndex(message Mensagem) int {
 	return -1
 }
 
+// Função para retornar o indice de uma determinada mensagem na lista de mensagem Final
 func (module *URB_Module) getIndexFinal(message Mensagem) int {
 	for i := 0; i < len(module.final); i++ {
 		if message.Message == module.final[i].Message {
@@ -168,28 +156,65 @@ func (module *URB_Module) getIndexFinal(message Mensagem) int {
 	return -1
 }
 
-func (module *URB_Module) RemoveIndexFinal(index int) []Mensagem {
-	return append(module.final[:index], module.final[index+1:]...)
+// Função para remover uma mensagem da lista Final dado um indice
+func (module *URB_Module) RemoveIndexFinal(index int) {
+	module.final = append(module.final[:index], module.final[index+1:]...)
 }
 
-func (module *URB_Module) tryDeliver() {
-	fmt.Println("TRY DELIVER")
+// Função para retornar o indice da mensagem com menor timestamp ta lista Final
+func (module *URB_Module) getMin() int {
+	var index = -1
+	var min = math.Inf(1)
 	for i := 0; i < len(module.final); i++ {
-		for j := 0; j < len(module.listaDeMensagens); j++ {
-			var max = getMaxTS(module.listaDeMensagens[i])
-			if max < module.final[i].Tempo {
-				return
-			}
+		if float64(module.final[i].Tempo) < min {
+			min = float64(module.final[i].Tempo)
+			index = i
 		}
-		module.deliver = append(module.deliver, module.final[i])
-		module.Deliver(URB_Ind_Message{
-			Message: module.final[i].Message,
-		})
-		module.final = module.RemoveIndexFinal(module.getIndexFinal(module.final[i]))
-
 	}
+
+	return index
 }
 
+// Função para checar se existe uma mensagem com timeStamp menor que o dado esperando receber o timestamp de outros processos
+func (module *URB_Module) temMenorEsperando(tempo int) bool {
+	for i := 0; i < len(module.listaDeMensagens); i++ {
+		var max = getMaxTS(module.listaDeMensagens[i])
+		if max < tempo {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Função para detectar se existe algum empate em relação a decisão do timestamp
+func (module *URB_Module) temEmpate(tempo int) bool {
+	for i := 0; i < len(module.final); i++ {
+		var tempoPesquisa = module.final[i].Tempo
+		if tempo == tempoPesquisa {
+			return true
+		}
+	}
+	return false
+}
+
+// // Função para atualizar a lista final, dado uma lista de indices que devem ser removidos
+// func (module *URB_Module) atualizaFinal(indexRemove []int) []Mensagem {
+// 	var novoFinal = []Mensagem{}
+// 	var procuraIndex = 0
+// 	for i := 0; i < len(module.final); i++ {
+// 		if i != indexRemove[procuraIndex] {
+// 			novoFinal = append(novoFinal, module.final[i])
+
+// 		} else {
+// 			procuraIndex = procuraIndex + 1
+// 		}
+// 	}
+
+// 	return novoFinal
+// }
+
+// Função que dado uma mensagem retorna o que ja está armazenado localmente
 func (module *URB_Module) getMensagemDaLista(message Mensagem) Local {
 	for i := 0; i < len(module.listaDeMensagens); i++ {
 		if message.Message == module.listaDeMensagens[i].Message {
@@ -199,9 +224,9 @@ func (module *URB_Module) getMensagemDaLista(message Mensagem) Local {
 	return Local{}
 }
 
+// Função para retornar o maior TimeStamp da lista de mensagens local
 func getMaxTS(message Local) int {
 	var timeStamp = 0
-
 	for i := 0; i < len(message.Tempo); i++ {
 		if message.Tempo[i] > timeStamp {
 			timeStamp = message.Tempo[i]
@@ -211,6 +236,7 @@ func getMaxTS(message Local) int {
 	return timeStamp
 }
 
+// Função para retornar o maior valor entre dois inteiros
 func getMaxClock(clock int, timeStamp int) int {
 	if clock > timeStamp {
 		return clock
@@ -219,6 +245,53 @@ func getMaxClock(clock int, timeStamp int) int {
 	}
 
 	return clock
+}
+
+// Função para lidar com o recebimento de mensagens
+func (module *URB_Module) receive(message Mensagem) {
+
+	if message.Tempo == CONST_TS_PADRAO {
+		module.clock = module.clock + 1
+		var msg = Mensagem{
+			Message: message.Message,
+			Tempo:   module.clock,
+		}
+		module.tratamentoMensagem(message, msg)
+
+		module.Broadcast(URB_Req_Message{
+			Addresses: module.addresses,
+			Message:   message.Message + "/" + strconv.Itoa(module.clock),
+		})
+
+	} else {
+		module.tratamentoMensagem(message, message)
+	}
+
+	if module.checarSeRecebeuDeTodos(message) {
+		module.jaRecebeuDeTodos(message)
+	}
+}
+
+// Função que fara as tentativas de entrega das mensagens
+func (module *URB_Module) tryDeliver() {
+	for {
+		if len(module.final) > 0 {
+			var indexMin = module.getMin()
+			fmt.Println(module.temEmpate(indexMin))
+			if module.temMenorEsperando(indexMin) {
+				return
+			} else {
+				module.Deliver(URB_Ind_Message{
+					Message: module.final[indexMin].Message,
+					Tempo:   strconv.Itoa(module.final[indexMin].Tempo),
+				})
+				module.RemoveIndexFinal(indexMin)
+			}
+		} else {
+			return
+
+		}
+	}
 }
 
 func (module *URB_Module) outDbg(s string) {
@@ -251,15 +324,14 @@ func (module *URB_Module) Start() {
 		for {
 			select {
 			case y := <-module.Req:
-				module.Broadcast(y)
-				module.adicionaMensagemLocal(Mensagem{
-					Message: y.Message,
-					Tempo:   y.TimeStamp,
-				})
+				go module.Broadcast(y)
 			case y := <-module.beb.Ind:
+				var conteudoMensagem = strings.Split(y.Message, "/")[0]
+				var tempo, e = strconv.Atoi(strings.Split(y.Message, "/")[1])
+				_ = e
 				module.receive(Mensagem{
-					Message: y.Message,
-					Tempo:   y.TimeStamp,
+					Message: conteudoMensagem,
+					Tempo:   tempo,
 				})
 			}
 
@@ -276,15 +348,16 @@ func (module *URB_Module) Broadcast(message URB_Req_Message) {
 
 	req := BestEffortBroadcast_Req_Message{
 		Addresses: module.addresses,
-		Message:   message.Message,
-		TimeStamp: message.TimeStamp}
+		Message:   message.Message}
 	module.beb.Req <- req
 }
 
 func (module *URB_Module) Deliver(message URB_Ind_Message) {
 
-	fmt.Println("DELIVERED")
-	// fmt.Println("Received '" + message.Message + "' from " + message.From)
+	if message.Tempo == "100" {
+		fmt.Println(module.final, module.listaDeMensagens)
+	}
+	fmt.Println("DELIVERED", message)
 	module.Ind <- message
 	// fmt.Println("# End BEB Received")
 }
