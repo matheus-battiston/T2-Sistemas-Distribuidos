@@ -68,6 +68,43 @@ type mensagemAux struct {
 
 var CONST_TS_PADRAO = -1
 
+func (module *SKEEN_Module) procuraEmpate(indiceDoEscolhido int) []int {
+	var indicesEmpatados = []int{}
+	for i := 0; i < len(module.final); i++ {
+		if i != indiceDoEscolhido && module.final[i].Tempo == module.final[indiceDoEscolhido].Tempo {
+			indicesEmpatados = append(indicesEmpatados, i)
+		}
+	}
+
+	return indicesEmpatados
+}
+
+func (module *SKEEN_Module) decideEmpate(indicesEmpate []int) []int {
+	var novaListaInteiros = []int{}
+	var listaIndices = indicesEmpate
+
+	for {
+		var maior = -1
+		var indiceMaior = -1
+		for i := 0; i < len(listaIndices); i++ {
+			if module.final[indicesEmpate[i]].Tempo > maior {
+				maior = module.final[indicesEmpate[i]].Tempo
+				indiceMaior = i
+			}
+		}
+
+		novaListaInteiros = append(novaListaInteiros, indicesEmpate[indiceMaior])
+		listaIndices = removeIndexInteiros(listaIndices, indiceMaior)
+
+		if len(listaIndices) == 0 {
+			break
+		}
+	}
+
+	return novaListaInteiros
+
+}
+
 // Função para adicionar um TimeStamp a uma mensagem que ja foi adicioanda
 func (module *SKEEN_Module) adicionaTimeStamp(message Mensagem) {
 	for i := 0; i < len(module.listaDeMensagens); i++ {
@@ -274,43 +311,6 @@ func (module *SKEEN_Module) receive(message Mensagem) {
 	if module.checarSeRecebeuDeTodos(message) {
 		module.jaRecebeuDeTodos(message)
 	}
-}
-
-func (module *SKEEN_Module) procuraEmpate(indiceDoEscolhido int) []int {
-	var indicesEmpatados = []int{}
-	for i := 0; i < len(module.final); i++ {
-		if i != indiceDoEscolhido && module.final[i].Tempo == module.final[indiceDoEscolhido].Tempo {
-			indicesEmpatados = append(indicesEmpatados, i)
-		}
-	}
-
-	return indicesEmpatados
-}
-
-func (module *SKEEN_Module) decideEmpate(indicesEmpate []int) []int {
-	var novaListaInteiros = []int{}
-	var listaIndices = indicesEmpate
-
-	for {
-		var maior = -1
-		var indiceMaior = -1
-		for i := 0; i < len(listaIndices); i++ {
-			if module.final[indicesEmpate[i]].Tempo > maior {
-				maior = module.final[indicesEmpate[i]].Tempo
-				indiceMaior = i
-			}
-		}
-
-		novaListaInteiros = append(novaListaInteiros, indicesEmpate[indiceMaior])
-		listaIndices = removeIndexInteiros(listaIndices, indiceMaior)
-
-		if len(listaIndices) == 0 {
-			break
-		}
-	}
-
-	return novaListaInteiros
-
 }
 
 // Função que fara as tentativas de entrega das mensagens
