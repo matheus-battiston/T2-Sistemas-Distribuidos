@@ -12,7 +12,7 @@ go run chat.go ...  127.0.0.1:6001  127.0.0.1:5001
 package main
 
 import (
-	. "SD/URB"
+	. "SD/skeen"
 	"bufio"
 	"fmt"
 	"log"
@@ -52,7 +52,7 @@ func jaMandouMensagem(nome string, listaQuemMandou []envios) bool {
 	return false
 }
 
-func enviarBroadcastsSemFalha(numeroInt int, addresses []string, urb URB_Module) {
+func enviarBroadcastsSemFalha(numeroInt int, addresses []string, skeen SKEEN_Module) {
 	var msg string
 
 	go func() {
@@ -60,10 +60,10 @@ func enviarBroadcastsSemFalha(numeroInt int, addresses []string, urb URB_Module)
 			numeroDaMsg := numeroInt + i
 			numeroDaMsgString := strconv.Itoa(numeroDaMsg)
 			msg = numeroDaMsgString + string("§") + string(addresses[0]) + "/-1"
-			req := URB_Req_Message{
+			req := SKEEN_Req_Message{
 				Addresses: addresses[1:],
 				Message:   msg}
-			urb.Req <- req
+			skeen.Req <- req
 		}
 	}()
 
@@ -72,10 +72,10 @@ func enviarBroadcastsSemFalha(numeroInt int, addresses []string, urb URB_Module)
 			numeroDaMsg := numeroInt + i + 5000
 			numeroDaMsgString := strconv.Itoa(numeroDaMsg)
 			msg = numeroDaMsgString + string("§") + string(addresses[0]) + "/-1"
-			req := URB_Req_Message{
+			req := SKEEN_Req_Message{
 				Addresses: addresses[1:],
 				Message:   msg}
-			urb.Req <- req
+			skeen.Req <- req
 		}
 	}()
 }
@@ -113,11 +113,11 @@ func main() {
 	var registro []string
 	addresses := os.Args[1:]
 
-	urb := URB_Module{
-		Req: make(chan URB_Req_Message),
-		Ind: make(chan URB_Ind_Message, 10000)}
+	skeen := SKEEN_Module{
+		Req: make(chan SKEEN_Req_Message),
+		Ind: make(chan SKEEN_Ind_Message, 10000)}
 
-	urb.Init(addresses[0], addresses[1:])
+	skeen.Init(addresses[0], addresses[1:])
 
 	// enviador de broadcasts
 	go func() {
@@ -131,7 +131,7 @@ func main() {
 		if scanner.Scan() {
 			msg = scanner.Text()
 			if msg == "2" {
-				enviarBroadcastsSemFalha(numeroInt, addresses, urb)
+				enviarBroadcastsSemFalha(numeroInt, addresses, skeen)
 			}
 		}
 	}()
@@ -140,7 +140,7 @@ func main() {
 	go func() {
 
 		for {
-			in := <-urb.Ind
+			in := <-skeen.Ind
 			message := strings.Split(in.Message, "§")
 			contagemDeEnvios = adicionaRecebido(message[1], contagemDeEnvios)
 			in.Tempo = message[1]
